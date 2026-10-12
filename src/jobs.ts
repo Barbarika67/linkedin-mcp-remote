@@ -144,6 +144,38 @@ function matchesCompany(job: LinkedInJob, company: string): boolean {
     (job.companyUrl ? normalize(job.companyUrl.split('/company/')[1] ?? '').includes(target) : false);
 }
 
+/** Convert LinkedIn's relative "3 weeks ago" text to an approximate ISO date (YYYY-MM-DD). */
+export function estimatePostedDate(timeAgo: string, now = new Date()): string | undefined {
+  const match = timeAgo.toLowerCase().match(/(\d+)\s+(minute|hour|day|week|month|year)s?\s+ago/);
+  if (!match) return undefined;
+
+  const amount = Number(match[1]);
+  const date = new Date(now);
+  switch (match[2]) {
+    case 'minute': date.setMinutes(date.getMinutes() - amount); break;
+    case 'hour': date.setHours(date.getHours() - amount); break;
+    case 'day': date.setDate(date.getDate() - amount); break;
+    case 'week': date.setDate(date.getDate() - amount * 7); break;
+    case 'month': date.setMonth(date.getMonth() - amount); break;
+    case 'year': date.setFullYear(date.getFullYear() - amount); break;
+  }
+  return date.toISOString().slice(0, 10);
+}
+
+/** Turn the job description HTML into plain text that keeps paragraphs and bullet points. */
+function descriptionToText(html: string): string {
+  const $root = cheerio.load(html, null, false);
+  $root('br').replaceWith('\n');
+  $root('li').each((_, el) => { $root(el).prepend('\n- '); });
+  $root('p, ul, ol').each((_, el) => { $root(el).append('\n\n'); });
+  return $root.root().text()
+    .split('\n')
+    .map(line => line.replace(/[ \t]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 // ============ Public API ============
 
 const PAGE_DELAY_MS = 500;
@@ -209,6 +241,7 @@ export async function getJobDetails(jobId: string): Promise<JobDetails | null> {
   const location = clean($('.topcard__flavor--bullet').first().text());
   const $companyLink = $('a.topcard__org-name-link');
   const splitList = (value?: string) => value?.split(',').map(s => s.trim()).filter(Boolean);
+  const postedTimeAgo = clean($('.posted-time-ago__text').text()) || 'Unknown';
 
   return {
     id: jobId,
@@ -219,14 +252,14 @@ export async function getJobDetails(jobId: string): Promise<JobDetails | null> {
     workplaceType: detectWorkplaceType(`${title} ${location}`),
     jobType: mapJobType(criteria['employment type']),
     experienceLevel: mapExperienceLevel(criteria['seniority level']),
-    postedDate: '',
-    postedTimeAgo: clean($('.posted-time-ago__text').text()) || 'Unknown',
+    postedTimeAgo,
+    postedDateApprox: estimatePostedDate(postedTimeAgo),
     applicants: clean($('.num-applicants__caption').text()) || undefined,
     salary: clean($('.salary.compensation__salary').text()) || undefined,
     url: `${LINKEDIN_BASE}/jobs/view/${jobId}`,
     isEasyApply: false,
     isPromoted: false,
-    fullDescription: $('.show-more-less-html__markup').text().trim(),
+    fullDescription: descriptionToText($('.show-more-less-html__markup').first().html() ?? ''),
     seniorityLevel: criteria['seniority level'],
     employmentType: criteria['employment type'],
     industries: splitList(criteria['industries']),

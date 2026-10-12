@@ -32,15 +32,18 @@ export class HttpError extends Error {
  * Fetch a URL and return the response body as text. Sends a form POST when `form` is given.
  * Retries rate-limited requests with backoff.
  */
-export async function fetchHtml(url: string, options: { form?: Record<string, string> } = {}): Promise<string> {
+export async function fetchHtml(
+  url: string,
+  options: { form?: Record<string, string>; headers?: Record<string, string> } = {},
+): Promise<string> {
   for (let attempt = 0; ; attempt++) {
     try {
       const response = options.form
         ? await client.post<string>(url, new URLSearchParams(options.form).toString(), {
             responseType: 'text',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...options.headers },
           })
-        : await client.get<string>(url, { responseType: 'text' });
+        : await client.get<string>(url, { responseType: 'text', headers: options.headers });
       return response.data;
     } catch (error) {
       const status = axios.isAxiosError(error) ? error.response?.status : undefined;

@@ -1,9 +1,9 @@
 /**
  * LinkedIn post search and post details.
  *
- * LinkedIn's own post search requires a login, so posts are discovered through
- * DuckDuckGo's HTML search (site:linkedin.com/posts). Individual public posts are
- * then readable without a login.
+ * LinkedIn's own post search requires a login, so posts are discovered through a web
+ * search for site:linkedin.com/posts: the Brave Search API when BRAVE_SEARCH_API_KEY is
+ * set, otherwise DuckDuckGo. Individual public posts are then readable without a login.
  */
 
 import * as cheerio from 'cheerio';
@@ -54,8 +54,9 @@ function resolveResultLink(href: string): string {
   }
 }
 
-async function searchWeb(query: string, dateCode?: string): Promise<SearchHit[]> {
+async function searchDuckDuckGo(query: string, datePosted?: string): Promise<SearchHit[]> {
   const form: Record<string, string> = { q: query };
+  const dateCode = datePosted ? DUCKDUCKGO_DATE_CODES[datePosted] : undefined;
   if (dateCode) form.df = dateCode;
 
   for (const engine of SEARCH_ENGINES) {
@@ -63,10 +64,80 @@ async function searchWeb(query: string, dateCode?: string): Promise<SearchHit[]>
     const hits = engine.parse(cheerio.load(html));
     if (hits.length > 0 || !isBotCheck(html)) return hits;
   }
-  throw new Error('Post search is temporarily blocked by the search engine. Try again in a few minutes.');
+  throw new Error('DuckDuckGo is blocking automated searches right now.');
 }
 
-const SEARCH_DATE_CODES: Record<string, string> = {
+// ============ Brave Search API (optional, set BRAVE_SEARCH_API_KEY) ============
+
+const BRAVE_SEARCH_URL = 'https://api.search.brave.com/res/v1/web/search';
+const BRAVE_PAGE_SIZE = 20;
+
+const BRAVE_FRESHNESS: Record<string, string> = {
+  'past-24-hours': 'pd', 'past-week': 'pw', 'past-month': 'pm',
+};
+
+interface BraveResponse {
+  web?: { results?: { url: string; title?: string; description?: string }[] };
+  query?: { more_results_available?: boolean };
+}
+
+/** Brave descriptions contain highlight markup such as <strong>; return plain text. */
+const stripTags = (html = '') => clean(cheerio.load(html, null, false).root().text());
+
+async function searchBrave(apiKey: string, query: string, limit: number, datePosted?: string): Promise<SearchHit[]> {
+  const hits: SearchHit[] = [];
+  const maxPages = Math.min(Math.ceil(limit / BRAVE_PAGE_SIZE), 5);
+
+  for (let offset = 0; offset < maxPages; offset++) {
+    const sp = new URLSearchParams({ q: query, count: String(BRAVE_PAGE_SIZE), offset: String(offset) });
+    const freshness = datePosted ? BRAVE_FRESHNESS[datePosted] : undefined;
+    if (freshness) sp.set('freshness', freshness);
+
+    const body = await fetchHtml(`${BRAVE_SEARCH_URL}?${sp}`, {
+      headers: { Accept: 'application/json', 'X-Subscription-Token': apiKey },
+    });
+    const data = JSON.parse(body) as BraveResponse;
+
+    for (const r of data.web?.results ?? []) {
+      hits.push({ href: r.url, title: stripTags(r.title), snippet: stripTags(r.description) });
+    }
+    if (!data.query?.more_results_available) break;
+  }
+  return hits;
+}
+
+/**
+ * Search the web with Brave when an API key is configured, falling back to
+ * DuckDuckGo (free, but it sometimes blocks automated requests).
+ */
+async function searchWeb(
+  query: string,
+  limit: number,
+  datePosted?: string,
+): Promise<{ hits: SearchHit[]; source: PostSearchResult['source'] }> {
+  const apiKey = process.env.BRAVE_SEARCH_API_KEY?.trim();
+  let braveError: string | undefined;
+
+  if (apiKey) {
+    try {
+      return { hits: await searchBrave(apiKey, query, limit, datePosted), source: 'brave' };
+    } catch (error) {
+      braveError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  try {
+    return { hits: await searchDuckDuckGo(query, datePosted), source: 'duckduckgo' };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const hint = apiKey
+      ? `Brave Search also failed: ${braveError}`
+      : 'Set BRAVE_SEARCH_API_KEY for reliable post search (see README).';
+    throw new Error(`Post search failed. ${reason} ${hint}`);
+  }
+}
+
+const DUCKDUCKGO_DATE_CODES: Record<string, string> = {
   'past-24-hours': 'd', 'past-week': 'w', 'past-month': 'm',
 };
 
@@ -130,11 +201,12 @@ function authorFromTitle(title: string): string | undefined {
 
 export async function searchPosts(params: PostSearchParams): Promise<PostSearchResult> {
   const query = buildSearchQuery(params);
-  const dateCode = params.datePosted ? SEARCH_DATE_CODES[params.datePosted] : undefined;
+  const limit = params.limit ?? DEFAULT_LIMIT;
+  const { hits, source } = await searchWeb(query, limit, params.datePosted);
   const posts: LinkedInPost[] = [];
   const seen = new Set<string>();
 
-  for (const { href, title, snippet } of await searchWeb(query, dateCode)) {
+  for (const { href, title, snippet } of hits) {
     const url = normalizePostUrl(resolveResultLink(href));
     if (!url || seen.has(url)) continue;
     seen.add(url);
@@ -155,8 +227,9 @@ export async function searchPosts(params: PostSearchParams): Promise<PostSearchR
   const filtered = params.hiringOnly ? posts.filter(p => p.isHiring) : posts;
 
   return {
-    posts: filtered.slice(0, params.limit ?? DEFAULT_LIMIT),
+    posts: filtered.slice(0, limit),
     query,
+    source,
     linkedInSearchUrl: buildPostSearchUrl(params),
   };
 }

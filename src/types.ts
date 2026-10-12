@@ -26,7 +26,9 @@ export interface LinkedInJob {
   isPromoted: boolean;
 }
 
-export interface JobDetails extends LinkedInJob {
+export interface JobDetails extends Omit<LinkedInJob, 'postedDate'> {
+  /** Estimated from LinkedIn's relative "posted ... ago" text; the job page has no exact date. */
+  postedDateApprox?: string;
   jobType?: JobType;
   experienceLevel?: ExperienceLevel;
   applicants?: string;
@@ -119,5 +121,7 @@ export interface PostSearchParams {
 export interface PostSearchResult {
   posts: LinkedInPost[];
   query: string;
+  /** Which search provider produced the results. */
+  source: 'brave' | 'duckduckgo';
   linkedInSearchUrl: string;
 }

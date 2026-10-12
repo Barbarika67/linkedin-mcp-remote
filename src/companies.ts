@@ -10,6 +10,23 @@ import type { LinkedInCompany } from './types.js';
 
 const clean = (text: string) => text.replace(/\s+/g, ' ').trim();
 
+/**
+ * Read the company website from the About section's link. LinkedIn wraps it in a
+ * redirect (/redir/redirect?url=...) and adds hidden "External link" text to the label.
+ */
+function readWebsite($: cheerio.CheerioAPI): string | undefined {
+  const $link = $('[data-test-id="about-us__website"] a').first();
+  const href = $link.attr('href');
+  if (href) {
+    try {
+      const url = new URL(href, LINKEDIN_BASE);
+      return url.searchParams.get('url') ?? (url.hostname.endsWith('linkedin.com') ? undefined : url.toString());
+    } catch { /* fall through to the visible text */ }
+  }
+  $link.find('.sr-only, .visually-hidden').remove();
+  return clean($link.text()) || undefined;
+}
+
 /** Get a company's public profile by its vanity name (e.g. "microsoft") or numeric ID. */
 export async function getCompany(companyId: string): Promise<LinkedInCompany | null> {
   const linkedInUrl = `${LINKEDIN_BASE}/company/${encodeURIComponent(companyId)}`;
@@ -39,7 +56,7 @@ export async function getCompany(companyId: string): Promise<LinkedInCompany | n
       $('meta[name="description"]').attr('content') || undefined,
     industry: about('industry'),
     size: about('size'),
-    website: about('website'),
+    website: readWebsite($),
     headquarters: about('headquarters'),
     founded: about('foundedOn'),
     specialties: about('specialties'),

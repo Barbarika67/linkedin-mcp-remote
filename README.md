@@ -124,7 +124,27 @@ npm install -g linkedin-mcp-search
 
 ### How post search works
 
-LinkedIn only allows post search when signed in, so `search_posts` finds public posts through DuckDuckGo (`site:linkedin.com/posts`). Results depend on what the search engine has indexed, so very recent posts may be missing. Each result includes `linkedInSearchUrl`, which opens LinkedIn's own post search in a browser where you're signed in.
+LinkedIn only allows post search when signed in, so `search_posts` finds public posts with a web search for `site:linkedin.com/posts`. Results depend on what the search engine has indexed, so very recent posts may be missing. Each result includes `linkedInSearchUrl`, which opens LinkedIn's own post search in a browser where you're signed in, and `source`, which shows the provider used.
+
+**Recommended: add a Brave Search API key.** Without a key, post search uses DuckDuckGo, which often blocks automated requests. Get a key at [brave.com/search/api](https://brave.com/search/api/) (a free plan is available) and add it to your MCP config:
+
+```json
+{
+  "mcpServers": {
+    "linkedin": {
+      "command": "npx",
+      "args": ["-y", "linkedin-mcp-search"],
+      "env": { "BRAVE_SEARCH_API_KEY": "your-key-here" }
+    }
+  }
+}
+```
+
+If Brave fails (for example, the monthly quota runs out), the server falls back to DuckDuckGo automatically.
+
+| Environment variable | Required | Description |
+|----------------------|----------|-------------|
+| `BRAVE_SEARCH_API_KEY` | No | Brave Search API key for reliable post search |
 
 ## Config File Locations
 

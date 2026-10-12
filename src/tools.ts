@@ -139,7 +139,7 @@ export const tools: Tool[] = [
   {
     name: 'search_posts',
     description:
-      'Search public LinkedIn posts, e.g. hiring announcements from recruiters and managers. Returns post links, authors, and snippets. Also returns a LinkedIn search URL for signed-in browsing.',
+      'Search public LinkedIn posts, e.g. hiring announcements from recruiters and managers. Returns post links, authors, and snippets, plus a LinkedIn search URL for signed-in browsing. Uses the Brave Search API when BRAVE_SEARCH_API_KEY is set, otherwise DuckDuckGo.',
     inputSchema: {
       type: 'object',
       properties: { ...postFilterProperties, limit: limitProperty },

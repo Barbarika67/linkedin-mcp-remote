@@ -171,6 +171,16 @@ async function main(): Promise<void> {
   const port = Number(process.env.PORT) || 3000;
 
   const httpServer = createServer(async (req, res) => {
+        const expectedToken = process.env.MCP_AUTH_TOKEN;
+
+    if (
+      !expectedToken ||
+      req.headers.authorization !== `Bearer ${expectedToken}`
+    ) {
+      res.writeHead(401, { 'Content-Type': 'text/plain' });
+      res.end('Unauthorized');
+      return;
+    }
     if (req.url?.split('?')[0] !== '/mcp') {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Not found');

@@ -6,7 +6,8 @@
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { createServer } from 'node:http';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 import { tools } from './tools.js';
@@ -157,9 +158,43 @@ async function handleTool(name: string, args: Args): Promise<unknown> {
 
 // ============ Entry point ============
 
+
+ // ============ Entry point ============
+
 async function main(): Promise<void> {
-  await server.connect(new StdioServerTransport());
-  console.error('LinkedIn MCP Server running on stdio');
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+  });
+
+  await server.connect(transport);
+
+  const port = Number(process.env.PORT) || 3000;
+
+  const httpServer = createServer(async (req, res) => {
+    if (req.url?.split('?')[0] !== '/mcp') {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not found');
+      return;
+    }
+
+    try {
+      await transport.handleRequest(req, res);
+    } catch (error) {
+      console.error('MCP request error:', error);
+
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+      }
+
+      if (!res.writableEnded) {
+        res.end('Internal server error');
+      }
+    }
+  });
+
+  httpServer.listen(port, '0.0.0.0', () => {
+    console.log(`LinkedIn MCP server listening on port ${port}`);
+  });
 }
 
 main().catch((error) => {
